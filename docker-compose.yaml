@@ -1,32 +1,58 @@
 version: '3'
 
 services:
+  # PROMETHEUS: Base de datos de métricas (lee cada 5 seg y guarda)
   prometheus:
     image: prom/prometheus
     container_name: prometheus
     volumes:
-      - ./prometheus/:/etc/prometheus/
+      - ./prometheus/:/etc/prometheus/  # Monta config prometheus.yml
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
     expose:
       - 9090
     ports:
-      - 9090:9090
+      - 9090:9090  # Acceso: http://localhost:9090
 
+  # NODE-EXPORTER: Lee métricas del HOST (CPU, RAM, disco, red)
   node-exporter:
     image: quay.io/prometheus/node-exporter:latest
     container_name: nodeexporter
+    command:
+      - '--path.procfs=/host/proc'      # /proc del host (info procesos/CPU/memoria)
+      - '--path.sysfs=/host/sys'        # /sys del host (info hardware)
+      - '--path.rootfs=/rootfs'         # Filesystem completo (espacio disco)
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     ports:
-      - 9100:9100
-    expose:
-      - 9100
-    # TODO: Configure the container carefully to accurately monitor host level metrics.
-    # This may involve setting up appropriate permissions and volume mounts to access host metrics.
-    # See: https://github.com/prometheus/node_exporter?tab=readme-ov-file#docker
+      - 9100:9100  # Métricas en: http://localhost:9100/metrics
+    volumes:
+      - /proc:/host/proc:ro    # Monta /proc de TU máquina (read-only)
+      - /sys:/host/sys:ro      # Monta /sys de TU máquina
+      - /:/rootfs:ro           # Monta filesystem completo
 
-  
+  # GRAFANA: Dashboards visuales (lee de Prometheus y crea gráficas)
   grafana:
     image: grafana/grafana-oss:latest
     container_name: grafana
     ports:
-      - 3000:3000
+      - 3000:3000  # Acceso: http://localhost:3000 (admin/admin)
+
+  # ZOOKEEPER: Coordinador de Kafka (servicio de soporte)
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    container_name: zookeeper
+    ports:
+      - 2181:2181
+
+  # KAFKA: Sistema de mensajería (graba logs como "cámara de seguridad")
+  kafka:
+    image: wurstmeister/kafka:latest
+    container_name: kafka
+    depends_on:
+      - zookeeper  # Kafka necesita Zookeeper corriendo primero
+    ports:
+      - 9092:9092  # Puerto para conectar producers/consumers
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: localhost
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CREATE_TOPICS: "movielog1:1:1"  # Crea topic automáticamente
